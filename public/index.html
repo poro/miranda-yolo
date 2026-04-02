@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Video Game Observer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Top Bar -->
+    <header id="toolbar">
+        <div class="toolbar-left">
+            <h1>YOLO Observer</h1>
+            <select id="videoSelect">
+                <option value="">-- Select a video --</option>
+            </select>
+            <label class="upload-btn" id="uploadBtn">
+                Upload
+                <input type="file" id="fileInput" accept=".mp4,.mkv,.avi,.mov,.webm" hidden>
+            </label>
+        </div>
+        <div class="toolbar-center">
+            <label>FPS: <input type="range" id="fpsSlider" min="0.5" max="5" step="0.5" value="1"><span id="fpsValue">1</span></label>
+            <label>Confidence: <input type="range" id="confSlider" min="0.1" max="0.9" step="0.05" value="0.3"><span id="confValue">0.30</span></label>
+            <label>Max frames: <input type="number" id="maxFrames" min="0" value="0" placeholder="0 = all" style="width:70px"></label>
+        </div>
+        <div class="toolbar-right">
+            <button id="exportCsvBtn" class="btn-secondary btn-sm" disabled title="Export detections as CSV">CSV</button>
+            <button id="exportFrameBtn" class="btn-secondary btn-sm" disabled title="Save current frame">Frame</button>
+            <button id="tipsBtn" class="btn-secondary btn-sm">Model Tips</button>
+            <button id="startBtn" class="btn-primary" disabled>Start</button>
+            <button id="pauseBtn" class="btn-secondary" disabled>Pause</button>
+            <button id="stopBtn" class="btn-danger" disabled>Stop</button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="content">
+        <!-- Left: Frame Preview -->
+        <section id="preview-panel">
+            <div id="canvas-container">
+                <canvas id="frameCanvas"></canvas>
+                <div id="drop-zone" class="drop-zone">
+                    <p>Drag & drop a video file here<br>or select one above</p>
+                </div>
+            </div>
+            <div id="frame-info">
+                <span id="frameCounter">Frame: --</span>
+                <span id="frameTimestamp">Time: --</span>
+                <span id="sceneStatus">Scene: --</span>
+                <span id="detectionCount">Objects: --</span>
+                <label class="toggle-label"><input type="checkbox" id="heatmapToggle"> Heatmap</label>
+                <label class="toggle-label"><input type="checkbox" id="annotateToggle"> Annotate</label>
+            </div>
+            <div id="progress-bar-container">
+                <div id="progress-bar"></div>
+            </div>
+            <!-- Frame scrubber (shown when paused) -->
+            <div id="frame-scrubber" class="hidden">
+                <input type="range" id="frameScrubber" min="0" max="0" value="0">
+                <span id="scrubberInfo">Frame --</span>
+            </div>
+            <!-- Filmstrip (shown when paused) -->
+            <div id="filmstrip" class="hidden"></div>
+            <!-- Annotation controls (shown in annotate mode) -->
+            <div id="annotation-bar" class="hidden">
+                <select id="annotationLabel"></select>
+                <input type="text" id="newLabel" placeholder="New class..." style="width:120px">
+                <button id="addLabelBtn" class="btn-secondary btn-sm">Add</button>
+                <span id="annotationStatus"></span>
+            </div>
+        </section>
+
+        <!-- Right: Stats Dashboard -->
+        <section id="stats-panel">
+            <!-- Performance -->
+            <div class="stats-card">
+                <h3>Performance</h3>
+                <div class="stat-grid">
+                    <div class="stat"><span class="stat-label">Inference</span><span class="stat-value" id="statInference">--</span></div>
+                    <div class="stat"><span class="stat-label">P95</span><span class="stat-value" id="statP95">--</span></div>
+                    <div class="stat"><span class="stat-label">Throughput</span><span class="stat-value" id="statThroughput">--</span></div>
+                    <div class="stat"><span class="stat-label">Memory</span><span class="stat-value" id="statMemory">--</span></div>
+                </div>
+            </div>
+
+            <!-- Scene Analysis -->
+            <div class="stats-card">
+                <h3>Scene Analysis</h3>
+                <div class="stat-grid">
+                    <div class="stat"><span class="stat-label">Changes</span><span class="stat-value" id="statChanges">--</span></div>
+                    <div class="stat"><span class="stat-label">Skipped</span><span class="stat-value" id="statSkipped">--</span></div>
+                    <div class="stat"><span class="stat-label">Skip Rate</span><span class="stat-value" id="statSkipRate">--</span></div>
+                    <div class="stat"><span class="stat-label">Frames</span><span class="stat-value" id="statFrames">--</span></div>
+                </div>
+                <div id="scene-timeline"></div>
+            </div>
+
+            <!-- Confidence Histogram -->
+            <div class="stats-card">
+                <h3>Confidence Distribution</h3>
+                <canvas id="confidenceHistogram" height="80"></canvas>
+            </div>
+
+            <!-- Object Search -->
+            <div class="stats-card">
+                <h3>Object Search</h3>
+                <div class="search-bar">
+                    <input type="text" id="searchInput" placeholder="Search objects (e.g. person, horse)">
+                    <button id="searchBtn" class="btn-primary btn-sm">Search</button>
+                    <button id="clearSearchBtn" class="btn-secondary btn-sm hidden">Clear</button>
+                </div>
+                <div id="search-results"></div>
+            </div>
+
+            <!-- Object Frequency -->
+            <div class="stats-card stats-card-grow">
+                <h3>Detected Objects</h3>
+                <div id="object-chart"></div>
+            </div>
+
+            <!-- Object Presence Timeline -->
+            <div class="stats-card">
+                <h3>Object Presence <button id="togglePresence" class="btn-sm btn-secondary">Show</button></h3>
+                <canvas id="presenceTimeline" class="hidden" height="200"></canvas>
+            </div>
+
+            <!-- Detection Log -->
+            <div class="stats-card stats-card-grow">
+                <h3>Detection Log</h3>
+                <div id="detection-log"></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Status Bar -->
+    <footer id="statusbar">
+        <span id="statusText">Ready</span>
+        <span id="connectionStatus">Disconnected</span>
+    </footer>
+
+    <!-- Model Tips Modal -->
+    <div id="tips-modal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Improving YOLO for Video Games</h2>
+                <button id="closeTipsBtn" class="btn-secondary btn-sm">&times;</button>
+            </div>
+            <div class="modal-body">
+                <details open>
+                    <summary>Why COCO Isn't Enough</summary>
+                    <p>The default YOLOv8n model is trained on COCO (80 generic classes: person, car, dog, etc.). It has no concept of game-specific elements like health bars, minimaps, quest markers, or HUD elements. It sees "person with sword near door" — not "player choosing between two paths."</p>
+                    <p>To get meaningful game analysis, you need to <strong>fine-tune</strong> the model on game-specific data.</p>
+                </details>
+
+                <details>
+                    <summary>Game-Specific Classes to Train</summary>
+                    <div class="class-tags">
+                        <span class="tag">player</span><span class="tag">enemy</span><span class="tag">npc</span>
+                        <span class="tag">health_bar</span><span class="tag">minimap</span><span class="tag">inventory</span>
+                        <span class="tag">quest_marker</span><span class="tag">hud_element</span><span class="tag">weapon</span>
+                        <span class="tag">loot_item</span><span class="tag">damage_number</span><span class="tag">crosshair</span>
+                        <span class="tag">ability_cooldown</span><span class="tag">ammo_counter</span><span class="tag">score_display</span>
+                        <span class="tag">menu_button</span><span class="tag">dialog_box</span><span class="tag">minimap_icon</span>
+                    </div>
+                    <p>Use the Annotate tool (checkbox in frame info bar) to draw bounding boxes and label game elements.</p>
+                </details>
+
+                <details>
+                    <summary>Annotation &amp; Training Workflow</summary>
+                    <ol>
+                        <li><strong>Collect:</strong> Process gameplay video, pause on interesting frames</li>
+                        <li><strong>Annotate:</strong> Use the built-in annotation tool to draw boxes around game elements</li>
+                        <li><strong>Promote:</strong> Auto-detected objects can be promoted to training annotations with one click</li>
+                        <li><strong>Export:</strong> Export as YOLO dataset format</li>
+                        <li><strong>Train:</strong> Use the Train button to fine-tune YOLOv8n on your annotations</li>
+                        <li><strong>Activate:</strong> Hot-swap the new model and see improved detections immediately</li>
+                    </ol>
+                    <p>Aim for <strong>500-2000 annotated frames</strong> across diverse gameplay situations for a good starting model.</p>
+                </details>
+
+                <details>
+                    <summary>Export Channels</summary>
+                    <table class="info-table">
+                        <tr><th>Channel</th><th>Best For</th><th>Advantages</th></tr>
+                        <tr><td><strong>Local YOLO</strong></td><td>Full control, privacy, offline</td><td>Free, data stays local, fastest iteration</td></tr>
+                        <tr><td><strong>Roboflow</strong></td><td>Team collab, production deployment</td><td>Auto-augmentation, versioning, hosted inference API, labeling UI, active learning</td></tr>
+                        <tr><td><strong>COCO JSON</strong></td><td>Interop with other tools</td><td>Universal format — import into CVAT, Label Studio, FiftyOne</td></tr>
+                        <tr><td><strong>CSV</strong></td><td>Spreadsheet analysis</td><td>Open in Excel/Sheets for manual review</td></tr>
+                    </table>
+                </details>
+
+                <details>
+                    <summary>Transfer Learning Tips</summary>
+                    <ul>
+                        <li><strong>Start small:</strong> Even 200 annotated frames can improve results significantly</li>
+                        <li><strong>Use augmentation:</strong> Ultralytics applies mosaic, flip, scale, HSV augmentation by default</li>
+                        <li><strong>Iterate:</strong> Train → test → annotate mistakes → retrain</li>
+                        <li><strong>Game diversity:</strong> Include frames from menus, gameplay, cutscenes, inventory screens</li>
+                        <li><strong>Resolution:</strong> 640px is the sweet spot for speed vs accuracy on nano models</li>
+                    </ul>
+                </details>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "yolo-game-observer",
+  "version": "0.4.0",
+  "description": "YOLOv8 object detection prototype for gameplay video analysis",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node tests/test-yolo-detection.js",
+    "benchmark": "node tests/benchmark.js",
+    "download-model": "node scripts/download-model.js",
+    "process-video": "node scripts/process-video.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.50.0",
+    "better-sqlite3": "^11.5.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "onnxruntime-node": "^1.17.0",
+    "sharp": "^0.33.2",
+    "ws": "^8.16.0"
+  }
+}

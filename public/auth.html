@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Observer — Sign In</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body { justify-content: center; align-items: center; }
+        .auth-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 32px;
+            width: 380px;
+            max-width: 90vw;
+        }
+        .auth-card h1 { font-size: 20px; color: var(--accent); margin-bottom: 4px; }
+        .auth-card p.sub { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
+        .auth-field { margin-bottom: 12px; }
+        .auth-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+        .auth-field input {
+            width: 100%; padding: 8px 12px; font-size: 14px;
+            background: var(--bg-input); color: var(--text-primary);
+            border: 1px solid var(--border); border-radius: 6px;
+        }
+        .auth-field input:focus { outline: none; border-color: var(--accent); }
+        .auth-btn {
+            width: 100%; padding: 10px; font-size: 14px; font-weight: 600;
+            background: var(--accent); color: #000; border: none; border-radius: 6px;
+            cursor: pointer; margin-top: 8px;
+        }
+        .auth-btn:hover { background: var(--accent-hover); }
+        .auth-btn.secondary {
+            background: var(--bg-input); color: var(--text-secondary);
+            border: 1px solid var(--border); margin-top: 8px;
+        }
+        .auth-btn.secondary:hover { border-color: var(--accent); color: var(--text-primary); }
+        .auth-toggle { text-align: center; margin-top: 16px; font-size: 12px; color: var(--text-muted); }
+        .auth-toggle a { color: var(--accent); cursor: pointer; text-decoration: none; }
+        .auth-error { color: var(--danger); font-size: 12px; margin-top: 8px; min-height: 18px; }
+        .auth-divider { text-align: center; margin: 16px 0; color: var(--text-muted); font-size: 12px; position: relative; }
+        .auth-divider::before, .auth-divider::after {
+            content: ''; position: absolute; top: 50%; width: 40%;
+            height: 1px; background: var(--border);
+        }
+        .auth-divider::before { left: 0; }
+        .auth-divider::after { right: 0; }
+        .skip-link { text-align: center; margin-top: 20px; }
+        .skip-link a { color: var(--text-muted); font-size: 12px; text-decoration: none; }
+        .skip-link a:hover { color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+    <div class="auth-card">
+        <h1>YOLO Observer</h1>
+        <p class="sub">Sign in to annotate and train models collaboratively</p>
+
+        <div id="loginForm">
+            <div class="auth-field">
+                <label>Email</label>
+                <input type="email" id="email" placeholder="you@example.com" autocomplete="email">
+            </div>
+            <div class="auth-field">
+                <label>Password</label>
+                <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+            </div>
+            <button class="auth-btn" id="loginBtn">Sign In</button>
+            <button class="auth-btn secondary" id="signupBtn">Create Account</button>
+            <div class="auth-error" id="authError"></div>
+
+            <div class="auth-divider">or</div>
+            <button class="auth-btn secondary" id="googleBtn">Continue with Google</button>
+            <button class="auth-btn secondary" id="githubBtn">Continue with GitHub</button>
+        </div>
+
+        <div class="skip-link">
+            <a href="/" id="skipLink">Continue without signing in (single-user mode)</a>
+        </div>
+    </div>
+
+    <script>
+        let supabase = null;
+
+        async function init() {
+            // Check if auth is enabled
+            const res = await fetch('/api/auth/config');
+            const config = await res.json();
+
+            if (!config.enabled) {
+                // No Supabase — go straight to app
+                window.location.href = '/';
+                return;
+            }
+
+            // Check if already logged in
+            const token = localStorage.getItem('yolo_token');
+            if (token) {
+                try {
+                    const me = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
+                    if (me.ok) { window.location.href = '/'; return; }
+                } catch {}
+                localStorage.removeItem('yolo_token');
+            }
+
+            // Load Supabase JS client from CDN
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
+            script.onload = () => {
+                supabase = window.supabase.createClient(config.url, config.anonKey);
+                // Check for OAuth redirect
+                supabase.auth.onAuthStateChange((event, session) => {
+                    if (session?.access_token) {
+                        localStorage.setItem('yolo_token', session.access_token);
+                        window.location.href = '/';
+                    }
+                });
+            };
+            document.head.appendChild(script);
+        }
+
+        document.getElementById('loginBtn').addEventListener('click', async () => {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const errEl = document.getElementById('authError');
+            errEl.textContent = '';
+
+            if (!supabase) { errEl.textContent = 'Auth not ready'; return; }
+            if (!email || !password) { errEl.textContent = 'Email and password required'; return; }
+
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            if (error) { errEl.textContent = error.message; return; }
+
+            localStorage.setItem('yolo_token', data.session.access_token);
+            window.location.href = '/';
+        });
+
+        document.getElementById('signupBtn').addEventListener('click', async () => {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const errEl = document.getElementById('authError');
+            errEl.textContent = '';
+
+            if (!supabase) { errEl.textContent = 'Auth not ready'; return; }
+            if (!email || !password) { errEl.textContent = 'Email and password required'; return; }
+            if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters'; return; }
+
+            const { data, error } = await supabase.auth.signUp({ email, password });
+            if (error) { errEl.textContent = error.message; return; }
+
+            if (data.session) {
+                localStorage.setItem('yolo_token', data.session.access_token);
+                window.location.href = '/';
+            } else {
+                errEl.textContent = 'Check your email to confirm your account.';
+                errEl.style.color = 'var(--success)';
+            }
+        });
+
+        document.getElementById('googleBtn').addEventListener('click', async () => {
+            if (!supabase) return;
+            await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin + '/auth.html' } });
+        });
+
+        document.getElementById('githubBtn').addEventListener('click', async () => {
+            if (!supabase) return;
+            await supabase.auth.signInWithOAuth({ provider: 'github', options: { redirectTo: window.location.origin + '/auth.html' } });
+        });
+
+        // Enter key triggers login
+        document.getElementById('password').addEventListener('keydown', e => {
+            if (e.key === 'Enter') document.getElementById('loginBtn').click();
+        });
+
+        init();
+    </script>
+</body>
+</html>
