@@ -47,10 +47,10 @@ function getVideoInfo(videoPath) {
  * @param {number} fps - Frames per second to extract
  * @returns {import('child_process').ChildProcess}
  */
-function createFrameStream(videoPath, fps) {
+function createFrameStream(videoPath, fps, targetWidth = 640, targetHeight = 640) {
     return spawn('ffmpeg', [
         '-i', videoPath,
-        '-vf', `fps=${fps}`,
+        '-vf', `fps=${fps},scale=${targetWidth}:${targetHeight}`,
         '-f', 'image2pipe',
         '-vcodec', 'png',
         '-'

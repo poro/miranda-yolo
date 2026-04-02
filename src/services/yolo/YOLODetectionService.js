@@ -112,9 +112,8 @@ class YOLODetectionService {
         const startTime = performance.now();
 
         try {
-            // Preprocess: resize to 640x640 and convert to float32 CHW
+            // Preprocess: decode to raw RGB (ffmpeg already delivers 640x640)
             const { data: rawPixels } = await sharp(imageBuffer)
-                .resize(this.inputSize, this.inputSize, { fit: 'fill' })
                 .removeAlpha()
                 .raw()
                 .toBuffer({ resolveWithObject: true });

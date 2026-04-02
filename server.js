@@ -38,6 +38,48 @@ if (!fs.existsSync(FRAMES_DIR)) fs.mkdirSync(FRAMES_DIR, { recursive: true });
 // --- Express setup ---
 
 const app = express();
+
+// --- Simple password gate (when AUTH_PASSWORD is set) ---
+const AUTH_PASSWORD = process.env.AUTH_PASSWORD;
+if (AUTH_PASSWORD) {
+    console.log('[Auth] Password protection enabled');
+    app.use((req, res, next) => {
+        // Allow WebSocket upgrades (handled separately)
+        if (req.headers.upgrade === 'websocket') return next();
+        // Check for session cookie
+        const cookies = req.headers.cookie || '';
+        const authed = cookies.split(';').some(c => c.trim() === 'miranda_auth=1');
+        if (authed) return next();
+        // Login page and login endpoint are always accessible
+        if (req.path === '/login' || req.path === '/api/login') return next();
+        // Redirect to login
+        res.redirect('/login');
+    });
+    app.get('/login', (req, res) => {
+        res.send(`<!DOCTYPE html><html><head><title>MIRANDA — Login</title>
+        <style>body{font-family:system-ui;background:#0d1117;color:#c9d1d9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
+        .card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;width:340px}
+        h1{font-size:20px;color:#58a6ff;margin:0 0 4px}p{font-size:13px;color:#8b949e;margin:0 0 20px}
+        input{width:100%;padding:10px;font-size:14px;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;box-sizing:border-box;margin-bottom:12px}
+        button{width:100%;padding:10px;font-size:14px;font-weight:600;background:#58a6ff;color:#000;border:none;border-radius:6px;cursor:pointer}
+        .err{color:#f85149;font-size:13px;display:none}</style></head>
+        <body><div class="card"><h1>🎯 MIRANDA YOLO</h1><p>Enter password to continue</p>
+        <form onsubmit="login(event)"><input type="password" id="pw" placeholder="Password" autofocus>
+        <div class="err" id="err">Incorrect password</div>
+        <button type="submit">Sign In</button></form></div>
+        <script>async function login(e){e.preventDefault();const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pw').value})});if(r.ok)location.href='/';else document.getElementById('err').style.display='block'}</script>
+        </body></html>`);
+    });
+    app.post('/api/login', express.json(), (req, res) => {
+        if (req.body && req.body.password === AUTH_PASSWORD) {
+            res.setHeader('Set-Cookie', 'miranda_auth=1; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800');
+            res.json({ ok: true });
+        } else {
+            res.status(401).json({ error: 'Wrong password' });
+        }
+    });
+}
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 // Serve saved frame images
@@ -418,7 +460,7 @@ async function handleStartProcessing(ws, msg) {
         confidence
     }));
 
-    const ffmpegProc = createFrameStream(videoPath, fps);
+    const ffmpegProc = createFrameStream(videoPath, fps, detector.inputSize, detector.inputSize);
     const jobId = Date.now().toString(36);
     currentJob = { id: jobId, sessionId, ffmpegProc, aborted: false, paused: false };
 
