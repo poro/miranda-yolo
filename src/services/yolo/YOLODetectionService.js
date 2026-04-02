@@ -86,7 +86,9 @@ class YOLODetectionService {
         try {
             this.session = await ort.InferenceSession.create(this.modelPath, {
                 executionProviders: ['cpu'],
-                graphOptimizationLevel: 'all'
+                graphOptimizationLevel: 'all',
+                intraOpNumThreads: 0,  // 0 = use all CPU cores
+                interOpNumThreads: 0
             });
             this.initialized = true;
             this.initError = null;
