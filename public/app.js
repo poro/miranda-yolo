@@ -66,15 +66,20 @@ async function checkAuth() {
     try {
         const res = await fetch('/api/auth/config');
         const config = await res.json();
-        if (!config.enabled) return; // No auth required
+        if (!config.enabled) return; // No auth required — single-user mode
         const token = getAuthToken();
-        if (!token) return; // Anonymous mode
+        if (!token) {
+            // Supabase is enabled but no token — redirect to sign in
+            window.location.href = '/auth.html';
+            return;
+        }
         const me = await apiFetch('/api/me');
         if (me.ok) {
             currentUser = await me.json();
             showUserMenu();
         } else {
             localStorage.removeItem('yolo_token');
+            window.location.href = '/auth.html';
         }
     } catch {}
 }
