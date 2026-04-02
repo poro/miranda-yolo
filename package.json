@@ -8,6 +8,8 @@
     "test": "node tests/test-yolo-detection.js",
     "benchmark": "node tests/benchmark.js",
     "download-model": "node scripts/download-model.js",
+    "download-all": "node scripts/download-model.js --all",
+    "download-recommended": "node scripts/download-model.js --recommended",
     "process-video": "node scripts/process-video.js"
   },
   "dependencies": {

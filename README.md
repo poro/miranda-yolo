@@ -94,9 +94,25 @@ git clone <repo-url>
 cd yolo
 npm install
 
-# Download/export the YOLOv8n ONNX model (~12MB)
-npm run download-model
+# Download models (choose one):
+npm run download-model              # Default: Nano @ 640 (~12MB, fastest)
+npm run download-recommended         # Auto-detect platform, pick best models
+npm run download-all                 # All 10 variants: n/s/m/l/x @ 640+1280
+
+# Or specific models:
+npm run download-model -- --size x --input 1280   # XLarge @ 1280
 ```
+
+### Platform Recommendations
+
+| Platform | Recommended Model | Expected FPS |
+|---|---|---|
+| **M4 Max MacBook (128GB)** | Large/XLarge @ 1280 | 20-30+ (CoreML) |
+| **Linux + NVIDIA H100** | XLarge @ 1280 | 60+ (CUDA) |
+| **Linux CPU (i3/i5)** | Nano @ 640 | 15-20 |
+| **Raspberry Pi** | Nano @ 640 | 2-5 |
+
+The server auto-detects CoreML (macOS) and CUDA (Linux + NVIDIA) execution providers.
 
 ### Run
 

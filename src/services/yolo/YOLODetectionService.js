@@ -53,6 +53,32 @@ class YOLODetectionService {
     /**
      * Resolve model path - checks project models/ directory and cwd
      */
+    /**
+     * Auto-detect best execution providers for the current platform
+     */
+    _detectExecutionProviders() {
+        const os = require('os');
+        const platform = os.platform();
+        const providers = [];
+
+        // macOS: try CoreML (Apple Silicon Metal acceleration)
+        if (platform === 'darwin') {
+            providers.push('coreml');
+        }
+
+        // Linux: try CUDA if nvidia-smi exists
+        if (platform === 'linux') {
+            try {
+                require('child_process').execSync('nvidia-smi', { stdio: 'ignore' });
+                providers.push('cuda');
+            } catch {}
+        }
+
+        // Always fall back to CPU
+        providers.push('cpu');
+        return providers;
+    }
+
     _resolveModelPath() {
         const candidates = [
             path.join(__dirname, '../../../models/yolov8n_640.onnx'),
@@ -86,8 +112,11 @@ class YOLODetectionService {
         }
 
         try {
+            // Auto-detect execution providers: CoreML on macOS, CUDA on Linux w/ GPU, CPU fallback
+            const providers = this._detectExecutionProviders();
+            console.log('[YOLO] Execution providers:', providers.join(', '));
             this.session = await ort.InferenceSession.create(this.modelPath, {
-                executionProviders: ['cpu'],
+                executionProviders: providers,
                 graphOptimizationLevel: 'all',
                 intraOpNumThreads: 0,  // 0 = use all CPU cores
                 interOpNumThreads: 0
