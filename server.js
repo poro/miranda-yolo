@@ -165,6 +165,41 @@ app.get('/api/resolutions', (req, res) => {
     res.json(RESOLUTION_PRESETS);
 });
 
+// --- Available models ---
+app.get('/api/models/available', (req, res) => {
+    const modelsDir = path.join(__dirname, 'models');
+    const files = fs.readdirSync(modelsDir).filter(f => f.endsWith('.onnx'));
+    const models = files.map(f => {
+        const match = f.match(/^(yolov8[nslmx])(?:_(\d+))?\.onnx$/);
+        if (!match) return null;
+        const variant = match[1];
+        const inputSize = match[2] ? parseInt(match[2]) : 640;
+        const sizeMB = (fs.statSync(path.join(modelsDir, f)).size / (1024*1024)).toFixed(0);
+        const labels = { yolov8n: 'Nano (fastest)', yolov8s: 'Small', yolov8m: 'Medium', yolov8l: 'Large', yolov8x: 'XLarge (most accurate)' };
+        return { file: f, variant, inputSize, label: `${labels[variant] || variant} @ ${inputSize}px (${sizeMB}MB)`, sizeMB: +sizeMB };
+    }).filter(Boolean).sort((a,b) => a.sizeMB - b.sizeMB);
+    res.json({ models, current: path.basename(detector.modelPath) });
+});
+
+app.post('/api/models/switch', async (req, res) => {
+    const { model } = req.body;
+    if (!model) return res.status(400).json({ error: 'model filename required' });
+    const modelPath = path.join(__dirname, 'models', model);
+    if (!fs.existsSync(modelPath)) return res.status(404).json({ error: 'Model not found' });
+    try {
+        // Parse input size from filename
+        const match = model.match(/_(\d+)\.onnx$/);
+        const inputSize = match ? parseInt(match[1]) : 640;
+        detector.modelPath = modelPath;
+        detector.inputSize = inputSize;
+        detector.initialized = false;
+        detectorReady = await detector.initialize();
+        res.json({ ok: true, model, inputSize, ready: detectorReady });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.get('/api/auth/config', (req, res) => {
     res.json(auth.getConfig());
 });

@@ -55,6 +55,8 @@ class YOLODetectionService {
      */
     _resolveModelPath() {
         const candidates = [
+            path.join(__dirname, '../../../models/yolov8n_640.onnx'),
+            path.join(process.cwd(), 'models/yolov8n_640.onnx'),
             path.join(__dirname, '../../../models/yolov8n.onnx'),
             path.join(process.cwd(), 'models/yolov8n.onnx')
         ];

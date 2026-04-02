@@ -11,6 +11,7 @@ const fpsSlider = $('fpsSlider'), fpsValue = $('fpsValue');
 const confSlider = $('confSlider'), confValue = $('confValue');
 const maxFramesInput = $('maxFrames');
 const resolutionSelect = $('resolutionSelect');
+const modelSelect = $('modelSelect');
 const startBtn = $('startBtn'), pauseBtn = $('pauseBtn'), stopBtn = $('stopBtn');
 const canvas = $('frameCanvas'), ctx = canvas.getContext('2d');
 const dropZone = $('drop-zone');
@@ -900,9 +901,47 @@ fetch('/api/resolutions').then(r => r.json()).then(presets => {
         const opt = document.createElement('option');
         opt.value = key;
         opt.textContent = info.label;
-        if (key === '720p') opt.selected = true; // Default to 720p as a good balance
+        if (key === '720p') opt.selected = true;
         resolutionSelect.appendChild(opt);
     }
 }).catch(() => {
     resolutionSelect.innerHTML = '<option value="640">640×640</option>';
+});
+
+// Load available models
+function loadModels() {
+    fetch('/api/models/available').then(r => r.json()).then(data => {
+        modelSelect.innerHTML = '';
+        for (const m of data.models) {
+            const opt = document.createElement('option');
+            opt.value = m.file;
+            opt.textContent = m.label;
+            if (m.file === data.current) opt.selected = true;
+            modelSelect.appendChild(opt);
+        }
+    }).catch(() => {
+        modelSelect.innerHTML = '<option value="yolov8n.onnx">Nano @ 640px</option>';
+    });
+}
+loadModels();
+
+modelSelect.addEventListener('change', async () => {
+    const model = modelSelect.value;
+    statusText.textContent = 'Switching model...';
+    modelSelect.disabled = true;
+    try {
+        const res = await apiFetch('/api/models/switch', {
+            method: 'POST',
+            body: JSON.stringify({ model })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            statusText.textContent = `Model: ${model} (input: ${data.inputSize}px)`;
+        } else {
+            statusText.textContent = 'Model switch failed: ' + (data.error || 'unknown');
+        }
+    } catch (e) {
+        statusText.textContent = 'Model switch error: ' + e.message;
+    }
+    modelSelect.disabled = false;
 });
