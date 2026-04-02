@@ -26,7 +26,7 @@ const SessionStore = require('./src/services/db/SessionStore');
 const AnnotationManager = require('./src/services/annotation/AnnotationManager');
 const TrainingPipeline = require('./src/services/training/TrainingPipeline');
 const SupabaseAuth = require('./src/services/auth/SupabaseAuth');
-const { getVideoInfo, createFrameStream, extractPNGFrames, formatTime } = require('./src/services/video/VideoFrameExtractor');
+const { getVideoInfo, createFrameStream, extractPNGFrames, formatTime, RESOLUTION_PRESETS } = require('./src/services/video/VideoFrameExtractor');
 
 const PORT = process.env.PORT || 6600;
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
@@ -159,6 +159,11 @@ app.get('/api/videos', (req, res) => {
 });
 
 // --- Auth Config (tells frontend whether Supabase is available) ---
+
+// --- Resolution presets ---
+app.get('/api/resolutions', (req, res) => {
+    res.json(RESOLUTION_PRESETS);
+});
 
 app.get('/api/auth/config', (req, res) => {
     res.json(auth.getConfig());
@@ -418,7 +423,12 @@ wss.on('connection', (ws) => {
 // =====================================================
 
 async function handleStartProcessing(ws, msg) {
-    const { videoPath, fps = 1, confidence = 0.3, maxFrames = 0 } = msg;
+    const { videoPath, fps = 1, confidence = 0.3, maxFrames = 0, resolution = '640' } = msg;
+
+    // Resolve resolution preset
+    const preset = RESOLUTION_PRESETS[resolution] || RESOLUTION_PRESETS['640'];
+    const extractWidth = preset.width;   // -1 = native
+    const extractHeight = preset.height;
 
     if (!detectorReady) {
         ws.send(JSON.stringify({ type: 'error', message: 'YOLO model not loaded' }));
@@ -457,10 +467,13 @@ async function handleStartProcessing(ws, msg) {
         duration: videoInfo.duration,
         estimatedFrames,
         fps,
-        confidence
+        confidence,
+        resolution,
+        extractWidth: extractWidth === -1 ? videoInfo.width : extractWidth,
+        extractHeight: extractHeight === -1 ? videoInfo.height : extractHeight
     }));
 
-    const ffmpegProc = createFrameStream(videoPath, fps, detector.inputSize, detector.inputSize);
+    const ffmpegProc = createFrameStream(videoPath, fps, extractWidth, extractHeight);
     const jobId = Date.now().toString(36);
     currentJob = { id: jobId, sessionId, ffmpegProc, aborted: false, paused: false };
 
@@ -476,6 +489,7 @@ async function handleStartProcessing(ws, msg) {
             if (maxFrames > 0 && frameNum > maxFrames) break;
 
             const timestamp = (frameNum - 1) / fps;
+            // detector.detect() handles resize to 640x640 internally
             const detections = await detector.detect(pngBuffer);
             const scene = analyzer.analyzeFrame(detections);
 

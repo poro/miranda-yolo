@@ -10,6 +10,7 @@ const videoSelect = $('videoSelect'), fileInput = $('fileInput');
 const fpsSlider = $('fpsSlider'), fpsValue = $('fpsValue');
 const confSlider = $('confSlider'), confValue = $('confValue');
 const maxFramesInput = $('maxFrames');
+const resolutionSelect = $('resolutionSelect');
 const startBtn = $('startBtn'), pauseBtn = $('pauseBtn'), stopBtn = $('stopBtn');
 const canvas = $('frameCanvas'), ctx = canvas.getContext('2d');
 const dropZone = $('drop-zone');
@@ -812,7 +813,8 @@ startBtn.addEventListener('click', () => {
         videoPath: selectedVideoPath,
         fps: parseFloat(fpsSlider.value),
         confidence: parseFloat(confSlider.value),
-        maxFrames: parseInt(maxFramesInput.value, 10) || 0
+        maxFrames: parseInt(maxFramesInput.value, 10) || 0,
+        resolution: resolutionSelect.value
     }));
     setProcessing(true);
     statusText.textContent = 'Starting...';
@@ -890,3 +892,17 @@ document.querySelector('.modal-backdrop')?.addEventListener('click', () => $('ti
 checkAuth();
 connectWS();
 loadVideoList();
+
+// Load resolution presets
+fetch('/api/resolutions').then(r => r.json()).then(presets => {
+    resolutionSelect.innerHTML = '';
+    for (const [key, info] of Object.entries(presets)) {
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = info.label;
+        if (key === '720p') opt.selected = true; // Default to 720p as a good balance
+        resolutionSelect.appendChild(opt);
+    }
+}).catch(() => {
+    resolutionSelect.innerHTML = '<option value="640">640×640</option>';
+});

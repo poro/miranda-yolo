@@ -47,10 +47,26 @@ function getVideoInfo(videoPath) {
  * @param {number} fps - Frames per second to extract
  * @returns {import('child_process').ChildProcess}
  */
+/**
+ * Resolution presets for frame extraction
+ */
+const RESOLUTION_PRESETS = {
+    '640':  { width: 640,  height: 640,  label: '640×640 (YOLO native, fastest)' },
+    '720p': { width: 1280, height: 720,  label: '720p (good balance)' },
+    '1080p':{ width: 1920, height: 1080, label: '1080p (high quality)' },
+    '1440p':{ width: 2560, height: 1440, label: '1440p (very high)' },
+    '4k':   { width: 3840, height: 2160, label: '4K (maximum quality, GPU recommended)' },
+    'native':{ width: -1,  height: -1,   label: 'Native (original video resolution)' }
+};
+
 function createFrameStream(videoPath, fps, targetWidth = 640, targetHeight = 640) {
+    // If -1, skip scaling (native resolution)
+    const vf = (targetWidth === -1 || targetHeight === -1)
+        ? `fps=${fps}`
+        : `fps=${fps},scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2`;
     return spawn('ffmpeg', [
         '-i', videoPath,
-        '-vf', `fps=${fps},scale=${targetWidth}:${targetHeight}`,
+        '-vf', vf,
         '-f', 'image2pipe',
         '-vcodec', 'png',
         '-'
@@ -103,5 +119,6 @@ module.exports = {
     getVideoInfo,
     createFrameStream,
     extractPNGFrames,
-    formatTime
+    formatTime,
+    RESOLUTION_PRESETS
 };
