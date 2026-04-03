@@ -135,6 +135,11 @@ class SessionStore {
         if (!annCols.has('updated_at')) this.db.exec('ALTER TABLE annotations ADD COLUMN updated_at TEXT');
         if (!annCols.has('updated_by')) this.db.exec('ALTER TABLE annotations ADD COLUMN updated_by TEXT');
 
+        // Detections migration
+        const detCols = cols('detections');
+        if (!detCols.has('deleted_at')) this.db.exec('ALTER TABLE detections ADD COLUMN deleted_at TEXT');
+        if (!detCols.has('original_label')) this.db.exec('ALTER TABLE detections ADD COLUMN original_label TEXT');
+
         // Sessions migration
         const sesCols = cols('sessions');
         if (!sesCols.has('user_id')) this.db.exec('ALTER TABLE sessions ADD COLUMN user_id TEXT');
@@ -265,18 +270,22 @@ class SessionStore {
             frameData.sceneChanged ? 1 : 0, frameData.reason || null, frameData.jaccard || null, detections.length);
         const frameId = result.lastInsertRowid;
 
+        const detectionIds = [];
         if (detections.length > 0) {
             const detStmt = this.db.prepare(`
                 INSERT INTO detections (frame_id, label, confidence, bbox_x, bbox_y, bbox_w, bbox_h)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             `);
             const insertMany = this.db.transaction((dets) => {
-                for (const d of dets) detStmt.run(frameId, d.label, d.confidence, d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h);
+                for (const d of dets) {
+                    const r = detStmt.run(frameId, d.label, d.confidence, d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h);
+                    detectionIds.push(Number(r.lastInsertRowid));
+                }
             });
             insertMany(detections);
         }
 
-        return frameId;
+        return { frameId, detectionIds };
     }
 
     getFrame(sessionId, frameNum) {
@@ -284,7 +293,7 @@ class SessionStore {
             'SELECT * FROM frames WHERE session_id = ? AND frame_num = ?'
         ).get(sessionId, frameNum);
         if (!frame) return null;
-        frame.detections = this.db.prepare('SELECT * FROM detections WHERE frame_id = ?').all(frame.id);
+        frame.detections = this.db.prepare('SELECT * FROM detections WHERE frame_id = ? AND deleted_at IS NULL').all(frame.id);
         frame.annotations = this.db.prepare('SELECT * FROM annotations WHERE frame_id = ? AND deleted_at IS NULL').all(frame.id);
         return frame;
     }
@@ -292,9 +301,28 @@ class SessionStore {
     getFrameById(frameId) {
         const frame = this.db.prepare('SELECT * FROM frames WHERE id = ?').get(frameId);
         if (!frame) return null;
-        frame.detections = this.db.prepare('SELECT * FROM detections WHERE frame_id = ?').all(frame.id);
+        frame.detections = this.db.prepare('SELECT * FROM detections WHERE frame_id = ? AND deleted_at IS NULL').all(frame.id);
         frame.annotations = this.db.prepare('SELECT * FROM annotations WHERE frame_id = ? AND deleted_at IS NULL').all(frame.id);
         return frame;
+    }
+
+    // --- Detection CRUD ---
+
+    deleteDetection(detectionId, userId = null) {
+        const det = this.db.prepare('SELECT * FROM detections WHERE id = ? AND deleted_at IS NULL').get(detectionId);
+        if (!det) return null;
+        this.db.prepare('UPDATE detections SET deleted_at = datetime(?) WHERE id = ?')
+            .run('now', detectionId);
+        return { deleted: true, id: detectionId };
+    }
+
+    reclassifyDetection(detectionId, newLabel, userId = null) {
+        const det = this.db.prepare('SELECT * FROM detections WHERE id = ? AND deleted_at IS NULL').get(detectionId);
+        if (!det) return null;
+        const originalLabel = det.original_label || det.label;
+        this.db.prepare('UPDATE detections SET label = ?, original_label = ? WHERE id = ?')
+            .run(newLabel, originalLabel, detectionId);
+        return this.db.prepare('SELECT * FROM detections WHERE id = ?').get(detectionId);
     }
 
     // =====================================================

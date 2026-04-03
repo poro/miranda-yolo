@@ -195,6 +195,7 @@ function renderFrame(msg, highlightLabel = null) {
         canvas.style.display = 'block';
         dropZone.classList.add('hidden');
         ctx.drawImage(frameImg, 0, 0);
+        window._annotationRegions = []; // Reset clickable regions for this render
         // Heatmap overlay
         if (heatmapToggle.checked && heatmapCanvas) {
             ctx.globalAlpha = 0.6;
@@ -230,13 +231,33 @@ function drawDetections(detections, w, h, highlight = '') {
         ctx.fillRect(x, y - 16, tw, 16);
         ctx.fillStyle = '#000';
         ctx.fillText(text, x + 4, y - 4);
+
+        // Show X (delete) and R (reclassify) icons when browsing and detection has a DB id
+        if (det.id && (isPaused || browsingIndex >= 0 || !isProcessing)) {
+            const iconY = y + 2, iconSize = 14;
+            // Delete X
+            ctx.fillStyle = 'rgba(248, 81, 73, 0.8)';
+            ctx.fillRect(x + bw - iconSize - 2, iconY, iconSize, iconSize);
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.fillText('X', x + bw - iconSize + 1, iconY + 11);
+            // Reclassify R
+            ctx.fillStyle = 'rgba(88, 166, 255, 0.8)';
+            ctx.fillRect(x + bw - iconSize * 2 - 4, iconY, iconSize, iconSize);
+            ctx.fillStyle = '#fff';
+            ctx.fillText('R', x + bw - iconSize * 2 - 1, iconY + 11);
+
+            window._annotationRegions.push(
+                { x: x + bw - iconSize - 2, y: iconY, w: iconSize, h: iconSize, action: 'delete_detection', id: det.id },
+                { x: x + bw - iconSize * 2 - 4, y: iconY, w: iconSize, h: iconSize, action: 'reclassify_detection', id: det.id }
+            );
+        }
+
         ctx.restore();
     }
 }
 
 function drawAnnotations(annotations, w, h) {
-    // Store clickable regions for annotation actions
-    window._annotationRegions = [];
     for (const ann of annotations) {
         const x = ann.bbox_x * w, y = ann.bbox_y * h;
         const bw = ann.bbox_w * w, bh = ann.bbox_h * h;
@@ -294,6 +315,8 @@ canvas.addEventListener('click', (e) => {
         if (cx >= region.x && cx <= region.x + region.w && cy >= region.y && cy <= region.y + region.h) {
             if (region.action === 'delete') deleteAnnotation(region.id);
             else if (region.action === 'reclassify') reclassifyAnnotation(region.id);
+            else if (region.action === 'delete_detection') deleteDetection(region.id);
+            else if (region.action === 'reclassify_detection') reclassifyDetection(region.id);
             return;
         }
     }
@@ -362,7 +385,13 @@ function addLogEntry(msg) {
 }
 
 function onComplete(msg) {
-    setProcessing(false);
+    isProcessing = false;
+    startBtn.disabled = !selectedVideoPath;
+    stopBtn.disabled = true;
+    videoSelect.disabled = false;
+    fpsSlider.disabled = false;
+    confSlider.disabled = false;
+
     const s = msg.aborted ? 'Stopped' : 'Complete';
     statusText.textContent = `${s}: ${msg.totalFrames} frames in ${msg.totalTime}s | Mean: ${msg.performance.mean}ms | Skip rate: ${msg.sceneAnalysis.skipRate}`;
     statInference.textContent = msg.performance.mean + 'ms';
@@ -374,6 +403,14 @@ function onComplete(msg) {
     updateObjectChart(msg.objectFrequency);
     progressBar.style.width = '100%';
     renderConfidenceHist();
+
+    // Auto-open frame browser so user can review, edit, delete detections
+    if (frameHistory.length > 0) {
+        browsingIndex = frameHistory.length - 1;
+        showFrameBrowser();
+        pauseBtn.textContent = 'Browse';
+        pauseBtn.disabled = true;
+    }
 }
 
 // ==============================
@@ -720,6 +757,42 @@ async function reclassifyAnnotation(annotationId) {
             renderFrame(frameHistory[browsingIndex]);
         }
         $('annotationStatus').textContent = `Reclassified to: ${newLabel}`;
+    }
+}
+
+// --- Detection Delete & Reclassify ---
+async function deleteDetection(detectionId) {
+    if (!confirm('Delete this detection?')) return;
+    const res = await apiFetch(`/api/detections/${detectionId}`, { method: 'DELETE' });
+    if (res.ok) {
+        const idx = browsingIndex >= 0 ? browsingIndex : frameHistory.length - 1;
+        if (frameHistory[idx]?.detections) {
+            frameHistory[idx].detections = frameHistory[idx].detections.filter(d => d.id !== detectionId);
+            renderFrame(frameHistory[idx]);
+        }
+        $('annotationStatus').textContent = `Deleted detection ${detectionId}`;
+    }
+}
+
+async function reclassifyDetection(detectionId) {
+    const classes = await (await fetch('/api/classes')).json();
+    const cocoLabels = ['person','bicycle','car','motorcycle','airplane','bus','train','truck','boat','traffic light','fire hydrant','stop sign','bench','bird','cat','dog','horse','sheep','cow','elephant','bear','zebra','giraffe','backpack','umbrella','handbag','tie','suitcase','frisbee','skis','snowboard','sports ball','kite','baseball bat','baseball glove','skateboard','surfboard','tennis racket','bottle','wine glass','cup','fork','knife','spoon','bowl','banana','apple','sandwich','orange','broccoli','carrot','hot dog','pizza','donut','cake','chair','couch','potted plant','bed','dining table','toilet','tv','laptop','mouse','remote','keyboard','cell phone','microwave','oven','toaster','sink','refrigerator','book','clock','vase','scissors','teddy bear','hair drier','toothbrush'];
+    const allLabels = [...new Set([...classes, ...cocoLabels])];
+    const newLabel = prompt('Reclassify to which label?\n\nAvailable: ' + allLabels.join(', '));
+    if (!newLabel) return;
+    const res = await apiFetch(`/api/detections/${detectionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ label: newLabel })
+    });
+    if (res.ok) {
+        const updated = await res.json();
+        const idx = browsingIndex >= 0 ? browsingIndex : frameHistory.length - 1;
+        if (frameHistory[idx]?.detections) {
+            const det = frameHistory[idx].detections.find(d => d.id === detectionId);
+            if (det) det.label = updated.label;
+            renderFrame(frameHistory[idx]);
+        }
+        $('annotationStatus').textContent = `Reclassified detection to: ${newLabel}`;
     }
 }
 

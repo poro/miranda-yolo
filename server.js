@@ -317,6 +317,24 @@ app.get('/api/annotations/stats', (req, res) => {
     res.json(store.getAnnotationStats());
 });
 
+// --- Detections CRUD ---
+
+app.delete('/api/detections/:id', optionalAuth, (req, res) => {
+    const userId = req.user?.id || null;
+    const result = store.deleteDetection(+req.params.id, userId);
+    if (!result) return res.status(404).json({ error: 'Detection not found or already deleted' });
+    res.json(result);
+});
+
+app.patch('/api/detections/:id', optionalAuth, (req, res) => {
+    const { label } = req.body;
+    if (!label) return res.status(400).json({ error: 'label required' });
+    const userId = req.user?.id || null;
+    const result = store.reclassifyDetection(+req.params.id, label, userId);
+    if (!result) return res.status(404).json({ error: 'Detection not found or already deleted' });
+    res.json(result);
+});
+
 app.get('/api/classes', (req, res) => {
     res.json(annotationMgr.getClasses());
 });
@@ -541,7 +559,7 @@ async function handleStartProcessing(ws, msg) {
                 confidence: +d.confidence.toFixed(3),
                 bbox: d.bbox
             }));
-            const frameId = store.saveFrame(sessionId, {
+            const { frameId, detectionIds } = store.saveFrame(sessionId, {
                 frameNum,
                 timestamp: +timestamp.toFixed(2),
                 imagePath: framePath,
@@ -549,6 +567,9 @@ async function handleStartProcessing(ws, msg) {
                 reason: scene.reason,
                 jaccard: +scene.jaccard.toFixed(3)
             }, detMapped);
+
+            // Attach DB IDs to detections for frontend CRUD
+            detMapped.forEach((d, i) => { d.id = detectionIds[i]; });
 
             for (const d of detections) {
                 objectFrequency[d.label] = (objectFrequency[d.label] || 0) + 1;
