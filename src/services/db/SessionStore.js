@@ -1,5 +1,5 @@
 /**
- * SessionStore — SQLite persistence layer for YOLO Observer
+ * SessionStore — SQLite persistence layer for MIRANDA SENSE
  *
  * Stores sessions, frames, detections, annotations (with audit trail),
  * models, users, session sharing, and model contributors.

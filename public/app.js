@@ -1,5 +1,5 @@
 /**
- * YOLO Video Game Observer — Frontend Application
+ * MIRANDA SENSE — Frontend Application
  * Features: live detection, pause/resume, frame browser, search, heatmap,
  *           confidence histogram, object presence timeline, annotations, export
  */

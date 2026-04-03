@@ -1,4 +1,4 @@
-# YOLO Video Game Observer
+# MIRANDA SENSE
 
 An open-source, self-contained system for real-time object detection in gameplay video using YOLOv8. Includes a web GUI for live analysis, frame-by-frame inspection, annotation, multi-format export, and model fine-tuning — all aimed at building advanced YOLO models purpose-built for video games.
 

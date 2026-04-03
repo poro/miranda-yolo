@@ -1,5 +1,5 @@
 /**
- * YOLO Video Game Observer — Web Server
+ * MIRANDA SENSE — Web Server
  *
  * Express + WebSocket server with:
  * - Real-time YOLO detection streaming
@@ -690,7 +690,7 @@ server.on('error', (err) => {
         const fallback = PORT + 1;
         console.log(`  Port ${PORT} is in use, trying ${fallback}...`);
         server.listen(fallback, '0.0.0.0', () => {
-            console.log(`\n  YOLO Video Game Observer`);
+            console.log(`\n  MIRANDA SENSE`);
             console.log(`  http://localhost:${fallback}\n`);
         });
     } else {
@@ -699,6 +699,6 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n  YOLO Video Game Observer`);
+    console.log(`\n  MIRANDA SENSE`);
     console.log(`  http://localhost:${PORT}\n`);
 });
