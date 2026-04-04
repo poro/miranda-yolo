@@ -21,6 +21,7 @@ const sharp = require('sharp');
 try { require('dotenv').config(); } catch {}
 
 const YOLODetectionService = require('./src/services/yolo/YOLODetectionService');
+const MultiGPUPool = require('./src/services/yolo/MultiGPUPool');
 const YOLOSceneAnalyzer = require('./src/services/yolo/YOLOSceneAnalyzer');
 const SessionStore = require('./src/services/db/SessionStore');
 const AnnotationManager = require('./src/services/annotation/AnnotationManager');
@@ -103,18 +104,26 @@ const upload = multer({
 const store = new SessionStore();
 const auth = new SupabaseAuth();
 const detector = new YOLODetectionService({ confidenceThreshold: 0.3 });
+const gpuPool = new MultiGPUPool({ confidenceThreshold: 0.3 });
 const annotationMgr = new AnnotationManager(store);
 const trainingPipeline = new TrainingPipeline(store, annotationMgr, detector);
 let detectorReady = false;
+let gpuPoolReady = false;
 
 // Auth middleware shortcuts
 const requireAuth = auth.requireAuth();
 const optionalAuth = auth.optionalAuth();
 
 (async () => {
+    // Try multi-GPU pool first
+    gpuPoolReady = await gpuPool.initialize();
+    if (gpuPoolReady) {
+        console.log(`[Server] Multi-GPU pool ready (${gpuPool.workers.length} workers, ${path.basename(gpuPool.modelPath)}, ${gpuPool.inputSize}px)`);
+    }
+    // Also init single detector as fallback for training pipeline
     detectorReady = await detector.initialize();
     if (detectorReady) {
-        console.log('[Server] YOLO model loaded');
+        console.log('[Server] Single-GPU detector loaded (fallback)');
     } else {
         console.error('[Server] YOLO model failed to load:', detector.initError);
     }
@@ -483,7 +492,12 @@ async function handleStartProcessing(ws, msg) {
     const extractWidth = preset.width;   // -1 = native
     const extractHeight = preset.height;
 
-    if (!detectorReady) {
+    // Use multi-GPU pool if available, otherwise single detector
+    const usePool = gpuPoolReady && gpuPool.workers.length > 0;
+    const activeDetector = usePool ? gpuPool : detector;
+    const activeReady = usePool ? gpuPoolReady : detectorReady;
+
+    if (!activeReady) {
         ws.send(JSON.stringify({ type: 'error', message: 'YOLO model not loaded' }));
         return;
     }
@@ -498,8 +512,8 @@ async function handleStartProcessing(ws, msg) {
         return;
     }
 
-    detector.setConfidenceThreshold(confidence);
-    detector.resetPerformanceStats();
+    activeDetector.setConfidenceThreshold(confidence);
+    activeDetector.resetPerformanceStats();
 
     const analyzer = new YOLOSceneAnalyzer({ changeThreshold: 0.3, forceAnalyzeEveryN: 10 });
 
@@ -533,8 +547,15 @@ async function handleStartProcessing(ws, msg) {
     const objectFrequency = {};
     let frameNum = 0;
     const startTime = performance.now();
+    const batchSize = usePool ? gpuPool.workers.length : 1;
+    if (usePool) {
+        console.log(`[Process] Using ${gpuPool.workers.length} GPUs, batch size ${batchSize}, model: ${path.basename(gpuPool.modelPath)}`);
+    }
 
     try {
+        // Collect frames into batches for parallel GPU inference
+        let batch = []; // Array of { pngBuffer, frameNum, timestamp }
+
         for await (const pngBuffer of extractPNGFrames(ffmpegProc.stdout)) {
             if (currentJob.aborted || ws.readyState !== 1) break;
 
@@ -542,80 +563,89 @@ async function handleStartProcessing(ws, msg) {
             if (maxFrames > 0 && frameNum > maxFrames) break;
 
             const timestamp = (frameNum - 1) / fps;
-            // detector.detect() handles resize to 640x640 internally
-            const detections = await detector.detect(pngBuffer);
-            const scene = analyzer.analyzeFrame(detections);
+            batch.push({ pngBuffer, frameNum, timestamp });
 
-            // Save frame image to disk as JPEG
-            const frameName = `frame_${String(frameNum).padStart(5, '0')}.jpg`;
-            const framePath = path.join(sessionFramesDir, frameName);
-            try {
-                await sharp(pngBuffer).jpeg({ quality: 80 }).toFile(framePath);
-            } catch {}
+            // Process when batch is full or this is the last frame we'll take
+            const atLimit = maxFrames > 0 && frameNum >= maxFrames;
+            if (batch.length < batchSize && !atLimit) continue;
 
-            // Save to SQLite
-            const detMapped = detections.map(d => ({
-                label: d.label,
-                confidence: +d.confidence.toFixed(3),
-                bbox: d.bbox
-            }));
-            const { frameId, detectionIds } = store.saveFrame(sessionId, {
-                frameNum,
-                timestamp: +timestamp.toFixed(2),
-                imagePath: framePath,
-                sceneChanged: scene.changed,
-                reason: scene.reason,
-                jaccard: +scene.jaccard.toFixed(3)
-            }, detMapped);
+            // Run inference on all frames in the batch in parallel
+            const inferencePromises = batch.map(f => activeDetector.detect(f.pngBuffer));
+            const batchDetections = await Promise.all(inferencePromises);
 
-            // Attach DB IDs to detections for frontend CRUD
-            detMapped.forEach((d, i) => { d.id = detectionIds[i]; });
+            // Process results sequentially (DB writes, WS sends must be ordered)
+            for (let b = 0; b < batch.length; b++) {
+                const f = batch[b];
+                const detections = batchDetections[b];
+                const scene = analyzer.analyzeFrame(detections);
 
-            for (const d of detections) {
-                objectFrequency[d.label] = (objectFrequency[d.label] || 0) + 1;
-            }
+                // Save frame image to disk as JPEG (fire and forget)
+                const frameName = `frame_${String(f.frameNum).padStart(5, '0')}.jpg`;
+                const framePath = path.join(sessionFramesDir, frameName);
+                sharp(f.pngBuffer).jpeg({ quality: 80 }).toFile(framePath).catch(() => {});
 
-            // Send frame data to client
-            const frameMsg = {
-                type: 'frame',
-                frameNum,
-                frameId,
-                sessionId,
-                timestamp: +timestamp.toFixed(2),
-                timestampStr: formatTime(timestamp),
-                imageBase64: pngBuffer.toString('base64'),
-                detections: detMapped,
-                sceneChanged: scene.changed,
-                reason: scene.reason,
-                jaccard: +scene.jaccard.toFixed(3)
-            };
+                // Save to SQLite
+                const detMapped = detections.map(d => ({
+                    label: d.label,
+                    confidence: +d.confidence.toFixed(3),
+                    bbox: d.bbox
+                }));
+                const { frameId, detectionIds } = store.saveFrame(sessionId, {
+                    frameNum: f.frameNum,
+                    timestamp: +f.timestamp.toFixed(2),
+                    imagePath: framePath,
+                    sceneChanged: scene.changed,
+                    reason: scene.reason,
+                    jaccard: +scene.jaccard.toFixed(3)
+                }, detMapped);
 
-            if (ws.readyState === 1) {
-                ws.send(JSON.stringify(frameMsg));
-            }
+                detMapped.forEach((d, i) => { d.id = detectionIds[i]; });
 
-            // Stats every 10 frames
-            if (frameNum % 10 === 0) {
-                const perfStats = detector.getPerformanceStats();
-                const sceneStats = analyzer.getStats();
-                const mem = process.memoryUsage();
-                const elapsed = (performance.now() - startTime) / 1000;
+                for (const d of detections) {
+                    objectFrequency[d.label] = (objectFrequency[d.label] || 0) + 1;
+                }
 
+                // Send frame data to client
                 if (ws.readyState === 1) {
                     ws.send(JSON.stringify({
-                        type: 'stats',
-                        frameNum,
+                        type: 'frame',
+                        frameNum: f.frameNum,
+                        frameId,
                         sessionId,
-                        elapsed: +elapsed.toFixed(1),
-                        throughput: +(frameNum / elapsed).toFixed(1),
-                        estimatedFrames,
-                        performance: perfStats,
-                        sceneAnalysis: sceneStats,
-                        objectFrequency,
-                        memory: { rss_mb: +(mem.rss / 1024 / 1024).toFixed(1) }
+                        timestamp: +f.timestamp.toFixed(2),
+                        timestampStr: formatTime(f.timestamp),
+                        imageBase64: f.pngBuffer.toString('base64'),
+                        detections: detMapped,
+                        sceneChanged: scene.changed,
+                        reason: scene.reason,
+                        jaccard: +scene.jaccard.toFixed(3)
                     }));
                 }
             }
+
+            // Stats every batch (roughly every N frames where N = GPU count)
+            const perfStats = activeDetector.getPerformanceStats();
+            const sceneStats = analyzer.getStats();
+            const mem = process.memoryUsage();
+            const elapsed = (performance.now() - startTime) / 1000;
+
+            if (ws.readyState === 1 && frameNum % Math.max(10, batchSize) < batchSize) {
+                ws.send(JSON.stringify({
+                    type: 'stats',
+                    frameNum,
+                    sessionId,
+                    elapsed: +elapsed.toFixed(1),
+                    throughput: +(frameNum / elapsed).toFixed(1),
+                    estimatedFrames,
+                    performance: perfStats,
+                    sceneAnalysis: sceneStats,
+                    objectFrequency,
+                    memory: { rss_mb: +(mem.rss / 1024 / 1024).toFixed(1) },
+                    gpuCount: usePool ? gpuPool.workers.length : 1
+                }));
+            }
+
+            batch = [];
         }
     } catch (err) {
         if (!currentJob.aborted) {
@@ -629,7 +659,7 @@ async function handleStartProcessing(ws, msg) {
     try { ffmpegProc.kill('SIGTERM'); } catch {}
 
     const totalTime = (performance.now() - startTime) / 1000;
-    const perfStats = detector.getPerformanceStats();
+    const perfStats = activeDetector.getPerformanceStats();
     const sceneStats = analyzer.getStats();
 
     // Complete session in DB
