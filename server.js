@@ -439,7 +439,12 @@ wss.on('connection', (ws) => {
 
         switch (msg.type) {
             case 'start':
-                await handleStartProcessing(ws, msg);
+                handleStartProcessing(ws, msg).catch(err => {
+                    console.error('[Process] Unhandled error:', err.message);
+                    if (ws.readyState === 1) {
+                        ws.send(JSON.stringify({ type: 'error', message: err.message }));
+                    }
+                });
                 break;
 
             case 'stop':
@@ -557,6 +562,10 @@ async function handleStartProcessing(ws, msg) {
         let batch = []; // Array of { pngBuffer, frameNum, timestamp }
 
         for await (const pngBuffer of extractPNGFrames(ffmpegProc.stdout)) {
+            // Wait while paused
+            while (currentJob.paused && !currentJob.aborted) {
+                await new Promise(r => setTimeout(r, 100));
+            }
             if (currentJob.aborted || ws.readyState !== 1) break;
 
             frameNum++;
