@@ -82,7 +82,7 @@ if (AUTH_PASSWORD) {
 }
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), { etag: true, lastModified: true, maxAge: 0 }));
 // Serve saved frame images
 app.use('/data/frames', express.static(FRAMES_DIR));
 
