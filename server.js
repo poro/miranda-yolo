@@ -567,6 +567,12 @@ async function handleStartProcessing(ws, msg) {
         let batch = []; // Array of { pngBuffer, frameNum, timestamp }
 
         for await (const pngBuffer of extractPNGFrames(ffmpegProc.stdout)) {
+            // Yield to event loop so WS messages (pause/stop) can be processed
+            await new Promise(r => setImmediate(r));
+            // Wait while paused
+            while (currentJob.paused && !currentJob.aborted) {
+                await new Promise(r => setTimeout(r, 100));
+            }
             if (currentJob.aborted || ws.readyState !== 1) break;
 
             frameNum++;
