@@ -455,17 +455,22 @@ wss.on('connection', (ws) => {
                 break;
 
             case 'pause':
-                if (currentJob && !currentJob.paused && currentJob.ffmpegProc) {
+                if (currentJob && !currentJob.paused) {
                     currentJob.paused = true;
-                    currentJob.ffmpegProc.kill('SIGSTOP');
+                    // Pause ffmpeg's stdout so the for-await loop yields to the event loop
+                    if (currentJob.ffmpegProc && currentJob.ffmpegProc.stdout) {
+                        currentJob.ffmpegProc.stdout.pause();
+                    }
                     ws.send(JSON.stringify({ type: 'paused' }));
                 }
                 break;
 
             case 'resume':
-                if (currentJob && currentJob.paused && currentJob.ffmpegProc) {
+                if (currentJob && currentJob.paused) {
                     currentJob.paused = false;
-                    currentJob.ffmpegProc.kill('SIGCONT');
+                    if (currentJob.ffmpegProc && currentJob.ffmpegProc.stdout) {
+                        currentJob.ffmpegProc.stdout.resume();
+                    }
                     ws.send(JSON.stringify({ type: 'resumed' }));
                 }
                 break;
@@ -562,10 +567,6 @@ async function handleStartProcessing(ws, msg) {
         let batch = []; // Array of { pngBuffer, frameNum, timestamp }
 
         for await (const pngBuffer of extractPNGFrames(ffmpegProc.stdout)) {
-            // Wait while paused
-            while (currentJob.paused && !currentJob.aborted) {
-                await new Promise(r => setTimeout(r, 100));
-            }
             if (currentJob.aborted || ws.readyState !== 1) break;
 
             frameNum++;
