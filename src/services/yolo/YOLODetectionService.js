@@ -115,12 +115,24 @@ class YOLODetectionService {
             // Auto-detect execution providers: CoreML on macOS, CUDA on Linux w/ GPU, CPU fallback
             const providers = this._detectExecutionProviders();
             console.log('[YOLO] Execution providers:', providers.join(', '));
-            this.session = await ort.InferenceSession.create(this.modelPath, {
-                executionProviders: providers,
+            const sessionOpts = {
                 graphOptimizationLevel: 'all',
                 intraOpNumThreads: 0,  // 0 = use all CPU cores
                 interOpNumThreads: 0
-            });
+            };
+            try {
+                this.session = await ort.InferenceSession.create(this.modelPath, {
+                    ...sessionOpts,
+                    executionProviders: providers,
+                });
+            } catch (gpuErr) {
+                // CUDA/CoreML may fail if drivers are incomplete — fall back to CPU
+                console.warn('[YOLO] GPU provider failed, falling back to CPU:', gpuErr.message);
+                this.session = await ort.InferenceSession.create(this.modelPath, {
+                    ...sessionOpts,
+                    executionProviders: ['cpu'],
+                });
+            }
             this.initialized = true;
             this.initError = null;
             console.log('[YOLO] Model loaded successfully from', this.modelPath);

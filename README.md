@@ -347,7 +347,7 @@ npm run benchmark
 
 - COCO model recognizes generic objects, not game-specific elements (until fine-tuned)
 - Single-frame detection — no temporal dynamics (deliberation, backtracking)
-- No GPU acceleration (CPU only via onnxruntime-node)
+- GPU acceleration requires cuDNN 9 installed (see deployment notes below)
 - Pause/resume uses SIGSTOP/SIGCONT (macOS/Linux only)
 - Frame history buffer capped at 300 frames in browser memory
 
@@ -357,8 +357,86 @@ npm run benchmark
 - Object trajectory tracking across frames
 - Behavioral metric derivation (exploration coverage, action frequency)
 - Integration with LLM analysis for semantic understanding
-- GPU acceleration via onnxruntime-gpu
 - Multi-game model hub / community model sharing
+
+## Deployment: NVIDIA H100 x4 Server
+
+Miranda Sense runs on a dedicated GPU server with the following setup:
+
+### Hardware
+- **CPU:** AMD EPYC 7313P 16-Core
+- **RAM:** 251 GB
+- **GPU:** 4x NVIDIA H100 PCIe (80 GB VRAM each, 320 GB total)
+- **Storage:** 9 TB NVMe
+- **OS:** Ubuntu 24.04.3 LTS
+
+### System Dependencies
+```bash
+# cuDNN 9 is required for CUDA execution provider in onnxruntime-node
+sudo apt-get install -y libcudnn9-cuda-12 ffmpeg
+
+# Verify
+ldconfig -p | grep libcudnn.so.9
+ffprobe -version
+```
+
+### systemd Service
+The app runs as `miranda-sense.service`, installed at `/etc/systemd/system/`:
+
+```ini
+[Unit]
+Description=Miranda Sense — YOLO Game Observer
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/miranda-yolo
+Environment=PATH=/usr/bin:/usr/local/bin
+ExecStart=/usr/bin/node server.js
+EnvironmentFile=/home/ubuntu/miranda-yolo/.env
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now miranda-sense
+sudo systemctl status miranda-sense
+journalctl -u miranda-sense -f   # live logs
+```
+
+### Cloudflare Tunnel
+Exposed publicly via Cloudflare Tunnel as `sense.realm5.ai`:
+
+```yaml
+# /etc/cloudflared/config.yml
+ingress:
+  - hostname: sense.realm5.ai
+    service: http://localhost:6600
+```
+
+### Video Library (Dropbox via rclone)
+Gameplay videos are mounted from Dropbox using rclone FUSE:
+
+```bash
+# Mount point
+/mnt/dropbox/miranda movies/
+
+# Service: rclone-dropbox.service
+# Uses VFS caching (10 GB) for smooth video streaming
+```
+
+Set in `.env`:
+```
+MOVIE_DIR=/mnt/dropbox/miranda movies
+```
+
+### GPU Fallback
+The YOLO detection service auto-detects CUDA but gracefully falls back to CPU if the GPU provider fails (e.g., missing cuDNN). This ensures the app always starts, even without full GPU support.
 
 ## License
 
